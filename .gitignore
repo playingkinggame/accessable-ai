@@ -1,0 +1,121 @@
+
+# ==========================================
+# DEPENDENCIES
+# ==========================================
+node_modules/
+backend/.venv/
+backend/venv/
+backend/env/
+.venv/
+venv/
+env/
+
+# ==========================================
+# BUILD OUTPUTS
+# ==========================================
+dist/
+build/
+coverage/
+backend/dist/
+backend/build/
+*.tsbuildinfo
+
+# ==========================================
+# ENVIRONMENT VARIABLES / SECRETS
+# ==========================================
+.env
+.env.*
+!.env.example
+!.env.sample
+backend/.env
+backend/.env.*
+!backend/.env.example
+!backend/.env.sample
+
+# ==========================================
+# PYTHON
+# ==========================================
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.hypothesis/
+.tox/
+.nox/
+htmlcov/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
+wheels/
+
+# ==========================================
+# TESTING & COVERAGE
+# ==========================================
+.coverage
+.coverage.*
+coverage.xml
+nosetests.xml
+test-results/
+playwright-report/
+test-results.xml
+
+# ==========================================
+# LOGS & TEMPORARY FILES
+# ==========================================
+*.log
+logs/
+tmp/
+temp/
+*.tmp
+*.bak
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ==========================================
+# EDITORS & IDEs
+# ==========================================
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+
+# ==========================================
+# LOCAL DATABASES & RUNTIME FILES
+# ==========================================
+*.sqlite
+*.sqlite3
+*.db
+*.pid
+*.seed
+*.sock
+
+# ==========================================
+# LOCAL AI MODELS & LARGE GENERATED FILES
+# ==========================================
+*.pt
+*.pth
+*.onnx
+*.safetensors
+*.gguf
+models/
+checkpoints/
+
+# ==========================================
+# PACKAGE MANAGER TEMP FILES
+# ==========================================
+.npm/
+.pnpm-store/
+.yarn/cache/
+.yarn/unplugged/
+
+# ==========================================
+# LOCAL BACKEND EVALUATION OUTPUTS
+# ==========================================
+backend/eval/results/
+backend/eval/outputs/

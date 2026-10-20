@@ -1,0 +1,22 @@
+[
+  {"question": "சிறு விவசாயிகளுக்குச் சொட்டு நீர்ப் பாசனத்தில் எத்தனை சதவீதம் மானியம் கிடைக்கும்?", "expected_keywords": ["100 சதவீதம்|100%|நூறு சதவீதம்"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "மற்ற விவசாயிகளுக்கான மானிய சதவீதம் என்ன?", "expected_keywords": ["75 சதவீதம்|75%|எழுபத்தைந்து"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "அதிகபட்சம் எத்தனை ஹெக்டேர் நிலத்திற்கு மானியம் கிடைக்கும்?", "expected_keywords": ["5 ஹெக்டேர்|ஐந்து ஹெக்டேர்"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "சொட்டு நீர்ப் பாசன மானியத்திற்கு எங்கே விண்ணப்பிக்க வேண்டும்?", "expected_keywords": ["உழவன்|வேளாண்மை"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "மானிய விண்ணப்பத்திற்குத் தேவையான ஆவணங்கள் என்ன?", "expected_keywords": ["சிட்டா", "ஆதார்"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "சம்பா நெற்பயிர்க் காப்பீட்டுப் பதிவின் கடைசி நாள் எப்போது?", "expected_keywords": ["நவம்பர்|november", "15|பதினைந்து"], "expected_doc": "farmer_subsidy.pdf", "lang": "ta"},
+  {"question": "What is the helpline number for farmers?", "expected_keywords": ["1800-425-1111"], "expected_doc": "farmer_subsidy.pdf", "lang": "en"},
+  {"question": "ஏடிஸ் கொசு எங்கே முட்டையிடும்?", "expected_keywords": ["தேங்கி|தேங்கிய|சுத்தமான"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "வீட்டில் உள்ள தண்ணீர்ப் பாத்திரங்களை எவ்வளவு இடைவெளியில் காலி செய்ய வேண்டும்?", "expected_keywords": ["ஒவ்வொரு வாரம்|வாரந்தோறும்|வாரம்"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "டெங்குவின் அறிகுறிகள் என்ன?", "expected_keywords": ["தலைவலி", "மூட்டு வலி"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "காய்ச்சல் எத்தனை நாட்களுக்கு மேல் நீடித்தால் மருத்துவமனைக்குப் போக வேண்டும்?", "expected_keywords": ["இரண்டு நாட்க|2 நாட்க"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "டெங்கு காய்ச்சலின் போது எந்த மாத்திரைகளைத் தவிர்க்க வேண்டும்?", "expected_keywords": ["ஆஸ்பிரின்"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "நிலவேம்புக் குடிநீர் எங்கே இலவசமாகக் கிடைக்கும்?", "expected_keywords": ["ஆரம்ப சுகாதார"], "expected_doc": "health_advisory.pdf", "lang": "ta"},
+  {"question": "Which number should I call for health help?", "expected_keywords": ["104"], "expected_doc": "health_advisory.pdf", "lang": "en"},
+  {"question": "உதவித்தொகைக்கான குடும்ப வருமான வரம்பு என்ன?", "expected_keywords": ["2,50,000|இரண்டரை லட்சம்|2.5 லட்சம்"], "expected_doc": "student_scholarship.pdf", "lang": "ta"},
+  {"question": "மாதம் எவ்வளவு உதவித்தொகை கிடைக்கும்?", "expected_keywords": ["1,000|ஆயிரம்"], "expected_doc": "student_scholarship.pdf", "lang": "ta"},
+  {"question": "உதவித்தொகை எப்படிச் செலுத்தப்படும்?", "expected_keywords": ["வங்கிக் கணக்கு"], "expected_doc": "student_scholarship.pdf", "lang": "ta"},
+  {"question": "உதவித்தொகைக்கு விண்ணப்பிக்கக் கடைசி தேதி எப்போது?", "expected_keywords": ["ஆகஸ்ட் 31|31 ஆகஸ்ட்"], "expected_doc": "student_scholarship.pdf", "lang": "ta"},
+  {"question": "உதவித்தொகையைப் புதுப்பிக்க எவ்வளவு வருகைப்பதிவு தேவை?", "expected_keywords": ["75"], "expected_doc": "student_scholarship.pdf", "lang": "ta"},
+  {"question": "Which certificates are needed to apply for the scholarship?", "expected_keywords": ["income|வருமானச் சான்றிதழ்", "aadhaar|ஆதார்"], "expected_doc": "student_scholarship.pdf", "lang": "en"}
+]

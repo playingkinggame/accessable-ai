@@ -1,0 +1,6 @@
+{
+  "name": "AccessAble AI | அணுகல் AI",
+  "description": "Tamil-first voice assistant and accessible PDF RAG knowledge engine with live citations and multimodal low-vision controls.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
