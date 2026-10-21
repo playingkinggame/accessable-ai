@@ -68,11 +68,14 @@ export const FileDropzone: React.FC<FileDropzoneProps> = ({
       );
       playAudioCue('success');
       setTimeout(() => setSuccessMsg(null), 4000);
-    } catch {
+    } catch (err) {
+      // The backend explains why (scanned PDF, unsupported type, size): show that instead of a generic line.
+      const detail = err instanceof Error ? err.message.trim() : '';
       setErrorMsg(
-        language === 'ta'
-          ? 'பதிவேற்றத்தில் பிழை ஏற்பட்டது. மீண்டும் முயற்சிக்கவும்.'
-          : 'Upload failed. Please try again.'
+        detail ||
+          (language === 'ta'
+            ? 'பதிவேற்றத்தில் பிழை ஏற்பட்டது. மீண்டும் முயற்சிக்கவும்.'
+            : 'Upload failed. Please try again.')
       );
       playAudioCue('alert');
     }

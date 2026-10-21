@@ -139,9 +139,32 @@ def delete_document(doc_id: str) -> None:
         f.unlink(missing_ok=True)
 
 
+def _resolve(ref: str, docs: list[dict]) -> dict | None:
+    """Match a doc_id, an exact file name, or a fuzzy spoken name ("the welfare pdf")."""
+    r = (ref or "").strip().lower()
+    if not r:
+        return None
+    for d in docs:
+        if r in (d["id"].lower(), d["name"].lower()):
+            return d
+    for d in docs:
+        name = d["name"].lower()
+        stem = Path(name).stem
+        if r in name or r in stem or stem in r:
+            return d
+    words = {w for w in re.split(r"[^a-z0-9\u0b80-\u0bff]+", r) if len(w) > 2}
+    best, score = None, 0
+    for d in docs:
+        name_words = {w for w in re.split(r"[^a-z0-9\u0b80-\u0bff]+", d["name"].lower()) if len(w) > 2}
+        hit = len(words & name_words)
+        if hit > score:
+            best, score = d, hit
+    return best
+
+
 def get_document(ref: str) -> dict | None:
-    """ref = doc_id or filename."""
-    match = next((d for d in list_documents() if ref in (d["id"], d["name"])), None)
+    """ref = doc_id, filename, or an approximate name the voice model heard."""
+    match = _resolve(ref, list_documents())
     if not match:
         return None
     with _lock:
