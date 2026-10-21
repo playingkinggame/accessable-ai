@@ -10,8 +10,8 @@ from typing import AsyncIterable
 import httpx
 from dotenv import load_dotenv
 from livekit import rtc
-from livekit.agents import (DEFAULT_API_CONNECT_OPTIONS, Agent, AgentSession, JobContext, JobProcess, RunContext,
-                            WorkerOptions, cli, function_tool, inference, llm as lk_llm, tts as lk_tts)
+from livekit.agents import (DEFAULT_API_CONNECT_OPTIONS, Agent, AgentSession, JobContext, JobProcess,
+                            WorkerOptions, cli, inference, llm as lk_llm, tts as lk_tts)
 from livekit.plugins import google, groq, silero
 from livekit.plugins.turn_detector.multilingual import MultilingualModel
 
@@ -27,70 +27,77 @@ API_BASE = E("API_BASE_URL", "http://localhost:8000")
 AGENT_KEY = E("AGENT_KEY", "")
 _bg: set = set()
 
+
+def _int_env(name: str, default: int) -> int:
+    try:
+        return int(E(name) or default)
+    except ValueError:
+        return default
+
+
+# Token budget per turn. Groq's free tier is 8k tokens/minute and one request used to ask ~5.2k, so every
+# number here is deliberately small: a short answer, three short passages, six turns of history.
+MAX_COMPLETION_TOKENS = _int_env("VOICE_MAX_TOKENS", 400)
+MAX_PASSAGES = _int_env("VOICE_PASSAGES", 3)
+PASSAGE_CHARS = _int_env("VOICE_PASSAGE_CHARS", 400)
+DOCUMENT_CHARS = _int_env("VOICE_DOCUMENT_CHARS", 4000)
+HISTORY_ITEMS = 2 * _int_env("VOICE_HISTORY_TURNS", 6)  # one user + one assistant item per turn
+
 INSTRUCTIONS = """
-You are "AccessAble AI", a friendly human-sounding helper on a phone call in Tamil Nadu. You help people with
+You are "AccessAble AI", a warm, human-sounding helper on a phone call in Tamil Nadu. You help people with
 government schemes, health advisories and farming guidance. You sound like a kind, patient neighbour explaining
-something — never like someone reading a document out loud.
+something, never like someone reading a document.
 
-WHICH DOCUMENTS YOU HAVE (you CAN read uploaded PDFs)
-The documents in your index right now: __DOCUMENTS__
-- Any PDF the person uploaded in this app is one of these documents. It is indexed and readable by you. NEVER say
-  you cannot read PDFs, never say you only handle "pre-approved" or "official" documents, never call an upload a
-  "personal file" you cannot access, and never ask the person to paste or re-send the text.
-- If they ask what is inside a PDF, to summarise it, or mention "the file/document I uploaded": call
-  list_documents when you are not sure of the name, then read_document with that exact name. If the name is
-  already in the list above, call read_document straight away.
-- For a summary, pick the 2 or 3 things that matter most and say them in plain speech — not a page-by-page tour.
-- If the list above is empty and they ask about a file, say no documents are indexed yet and that they can add one
-  from the Library screen.
+WHAT YOU KNOW
+Indexed documents right now: __DOCUMENTS__
+- Any PDF the person uploaded in this app is on that list: it is indexed and you can read it. Never say you
+  cannot read PDFs, never call an upload a "personal file" you cannot access, and never ask them to paste text.
+- For every question the app hands you the relevant passages in a private CONTEXT note just before the turn.
+  That note is your only source of facts; you have no tools and no other memory.
 
-HOW YOU TALK
-- Talk, don't read. First person, everyday spoken words, 2 or 3 short sentences per reply at most.
-- NEVER read a passage word for word, never quote the document and never list its lines. Understand it, then say
-  the meaning in your own words, the way you would explain it to a friend.
-- Natural fillers are welcome occasionally (at most one per reply): Tamil "பாருங்க…", "சரி…", "அதாவது…";
-  English "Okay so…", "Well…", "Actually…". Never sound scripted or formal.
-- After the answer, ask ONE short follow-up question that genuinely helps the person, e.g.
-  "உங்களுக்கு எந்த மாவட்டம்?" or "Do you want the last date for that?". Only one question, and skip it if the
-  person is in an emergency or clearly wants to stop. Never ask a question just to fill time.
-- Finish by naming the source briefly and casually: "இது CMCHIS வழிகாட்டியிலிருந்து சொல்கிறேன்." or
-  "That's from the welfare schemes guide." Never say "Source:", never read a page number unless it genuinely
-  helps, never use citation markers like [1].
+ANSWERING (strict)
+- Answer ONLY from the private CONTEXT note. If it is empty or says NO_RESULTS, say honestly in the person's
+  language that the documents do not have that information, offer another way to ask or the relevant office,
+  and never invent facts, amounts, dates or rules.
+- Never read the note aloud, never quote a passage word for word, and never mention notes, passages or search.
+- Paraphrase in your own words, the way you would tell a friend. 1 to 3 short spoken sentences.
+- End by naming the source casually: "இது CMCHIS வழிகாட்டியிலிருந்து சொல்கிறேன்." or "That's from the welfare
+  schemes guide." Never say "Source:" and never cite numbers like [1] or a page number unless it truly helps.
+- If the CONTEXT is a whole document, give the 2 or 3 things that matter most, not a page-by-page tour.
+- At most one natural filler per reply (பாருங்க…, சரி…, Okay so…). Never sound scripted or formal.
 - No markdown, bullets, emojis, brackets, headings or reasoning out loud.
 
 LANGUAGE (strict)
 - Answer in the language of the person's LAST message, always.
-  * They spoke English -> answer in plain spoken Indian English only: no Tamil script, no Tamil sentences.
-    ("you can apply at the office", not "kindly proceed to the facility".)
-  * They spoke Tamil -> answer in spoken Tamil script only (தமிழ், never transliterated with English letters).
-- The app's interface language (__UI__) says nothing about how to speak: it only decides your first greeting.
-  The person's own words always win over the interface language.
-- One language per reply. Never mix Tamil and English in the same answer — the only English allowed inside a
-  Tamil reply is a scheme name, an acronym or a number people really say that way (CMCHIS, 104).
-- If one message mixes both languages, answer in the one they used more.
-- NEVER change an amount. Copy the digits from the document first, then say them aloud:
-  1,000 -> "ஆயிரம் ரூபாய்" (one thousand rupees); 10,000 -> "பத்தாயிரம்"; 1,00,000 -> "ஒரு லட்சம்";
-  5,00,000 -> "ஐந்து லட்சம்"; 1,00,00,000 -> "ஒரு கோடி". A pension of 1,000 is ஆயிரம் — it is never a
-  லட்சம் or a கோடி. If you are unsure of an amount, say the digits: "ஆயிரம் ரூபாய்".
-- Say percentages and dates the way people say them aloud: 75% -> "எழுபத்தைந்து சதவீதம்",
-  நவம்பர் 15 -> "நவம்பர் பதினைந்தாம் தேதி", 5 ஹெக்டேர் -> "ஐந்து ஹெக்டேர்".
-  Read phone numbers digit by digit.
-
-GROUNDING (strict)
-- ALWAYS call search_documents before answering any factual question, with a short query in the person's language.
-  Only greetings, thanks and document summaries via read_document may skip it. Never answer from memory.
-- The tool output is your private notes, not a script: paraphrase it, never read it out.
-- Use ONLY what the tools return. If they return NO_RESULTS or SEARCH_ERROR, say honestly in the person's language
-  that the documents do not have that information (Tamil: "மன்னிக்கவும், என்னிடம் உள்ள ஆவணங்களில் இதற்கான தகவல் இல்லை."),
-  offer to search a different way or to contact the relevant office, and never invent an answer. Never invent a
-  policy about what you are or are not allowed to read.
+  * They spoke English -> plain spoken Indian English only: no Tamil script, no Tamil sentences.
+  * They spoke Tamil -> spoken Tamil script only (தமிழ், never transliterated with English letters).
+- One language per reply. Inside a Tamil reply the only English allowed is a scheme name, an acronym or a number
+  people really say that way (CMCHIS, 104).
+- The interface language (__UI__) only decides your greeting; the person's own words always win.
+- NEVER change an amount; copy the digits from the document first, then say them aloud:
+  1,000 -> "ஆயிரம் ரூபாய்"; 10,000 -> "பத்தாயிரம்"; 1,00,000 -> "ஒரு லட்சம்"; 5,00,000 -> "ஐந்து லட்சம்";
+  1,00,00,000 -> "ஒரு கோடி". If unsure of an amount, say the digits.
+- Say percentages, dates and phone numbers the way people say them aloud:
+  75% -> "எழுபத்தைந்து சதவீதம்", நவம்பர் 15 -> "நவம்பர் பதினைந்தாம் தேதி". Read phone numbers digit by digit.
 
 SAFETY
-- Do not diagnose illness or give medical opinions. For emergencies, tell the person to go to the nearest government
-  hospital or call 104.
+- Do not diagnose illness or give medical opinions. In an emergency, send the person to the nearest government
+  hospital or tell them to call 104.
 """.strip()
 
+NOT_FOUND_NOTE = ("NO_RESULTS: nothing in the indexed documents matches the person's question. Tell them honestly, "
+                  "in their own language, that the documents do not have this information; never guess or invent an "
+                  "answer. Documents you do have: {docs}")
+NO_TEXT_NOTE = ("DOCUMENT {name} has no readable text (it may be a scanned image). Tell the person honestly and "
+                "suggest they contact the relevant office.")
+UNAVAILABLE_NOTE = ("SEARCH_ERROR: the documents cannot be checked right now. Say honestly that you cannot look at "
+                    "them at the moment and that they should try again shortly; never guess.")
+
 TAMIL = re.compile(r"[\u0B80-\u0BFF]")
+# "summarise the PDF I uploaded" is handled by fetching that document, not by a search hit.
+DOC_HINT = re.compile(r"pdf|document|file|report|upload|ஆவண|கோப்பு|அறிக்கை", re.I)
+SUMMARY_HINT = re.compile(r"summar|overview|what'?s (inside|in)|what is (inside|in)|tell me about|read (it|that|this)|"
+                          r"explain (it|that|this|the)|சுருக்க|என்ன இருக்கு|என்ன உள்ளது|பற்றி சொல்|சொல்லுங்க", re.I)
 
 
 def detect_lang(text: str) -> str | None:
@@ -119,6 +126,10 @@ def build_instructions(lang: str | None = None, docs: list[str] | None = None, u
 
 def _spoken(doc: str) -> str:
     return Path(doc).stem.replace("_", " ").replace("-", " ")
+
+
+def _wants_full_document(text: str) -> bool:
+    return bool(DOC_HINT.search(text) and SUMMARY_HINT.search(text))
 
 
 async def publish(room: rtc.Room, topic: str, payload: dict) -> None:
@@ -175,33 +186,78 @@ async def strip_reasoning(text: AsyncIterable[str]) -> AsyncIterable[str]:
 
 
 # ---------------- component builders ----------------
-def _groq_llm(model: str, effort: str):
-    for kw in ({"reasoning_effort": effort}, {"extra_kwargs": {"reasoning_effort": effort}}, {}):  # VERIFY kwarg
+def _groq_llm(model: str) -> lk_llm.LLM:
+    """gpt-oss spends reasoning tokens from the same budget as the answer, so keep effort low and the cap small."""
+    kw: dict = {"model": model, "max_completion_tokens": MAX_COMPLETION_TOKENS}
+    if "gpt-oss" in model.lower():
+        kw["reasoning_effort"] = E("REASONING_VOICE", "low")
+    for attempt in (kw, {"model": model}):
         try:
-            return groq.LLM(model=model, **kw)
+            return groq.LLM(**attempt)
         except TypeError:
             continue
-    raise RuntimeError("groq.LLM init failed")
+    raise RuntimeError(f"groq.LLM init failed for {model}")
+
+
+def _gemini_llm() -> lk_llm.LLM:
+    kw: dict = {"max_output_tokens": MAX_COMPLETION_TOKENS}
+    model = (E("GEMINI_MODEL") or "").strip()
+    if model:
+        kw["model"] = model
+    level = (E("GEMINI_THINKING_LEVEL", "low") or "").strip().lower()
+    if level and "gemini-3" in model.lower():  # thinking_level exists on 3.x; 2.x takes a token budget instead
+        kw["thinking_config"] = {"thinking_level": level}
+    return google.LLM(**kw)
+
+
+def _log_llm_metrics(metrics) -> None:
+    """Which model actually answered the turn, and what it cost — the numbers that explain a 429."""
+    try:
+        log.info("LLM served by %s | prompt=%d completion=%d reasoning=%d | ttft=%.0f ms",
+                 metrics.label, metrics.prompt_tokens, metrics.completion_tokens,
+                 metrics.reasoning_tokens or 0, max(metrics.ttft, 0.0) * 1000)
+    except Exception:
+        log.info("LLM metrics: %s", metrics)
+
+
+class _OrderedFallback(lk_llm.FallbackAdapter):
+    """FallbackAdapter retires a model after its first failure: it is marked unavailable and only a background
+    recovery probe can bring it back. One Groq 429 therefore parked every later turn on Gemini (5 RPM free
+    tier) until that failed too. Retry the configured order on every request instead: a 429 is rejected before
+    any prompt tokens are billed, and the primary's quota recovers within seconds."""
+
+    def _llm_order(self) -> list[int]:
+        status = getattr(self, "_status", None)
+        if isinstance(status, list):
+            for entry in status:
+                entry.available = True
+        try:
+            return super()._llm_order()
+        except Exception:
+            return list(range(len(getattr(self, "_llm_instances", []) or [])))
 
 
 def build_llm():
-    effort = E("REASONING_VOICE", "low")
     items = []
-    for p in [x.strip().lower() for x in E("LLM_PROVIDERS", "groq,gemini").split(",") if x.strip()]:
+    providers = [x.strip().lower() for x in (E("LLM_PROVIDERS", "groq,gemini") or "").split(",") if x.strip()]
+    for p in ("groq", "gemini", "ollama"):  # fixed order: 120b -> 20b -> gemini
+        if p not in providers:
+            continue
         if p == "groq" and E("GROQ_API_KEY"):
-            items += [_groq_llm(E("GROQ_MODEL", "openai/gpt-oss-120b"), effort),
-                      _groq_llm(E("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b"), effort)]
+            items += [_groq_llm(E("GROQ_MODEL", "openai/gpt-oss-120b")),
+                      _groq_llm(E("GROQ_FALLBACK_MODEL", "openai/gpt-oss-20b"))]
         elif p == "gemini" and E("GOOGLE_API_KEY"):
-            items.append(google.LLM(model=E("GEMINI_MODEL", "gemini-3.8-flash")))
+            items.append(_gemini_llm())
         elif p == "ollama":
             from livekit.plugins import openai as lk_openai
             items.append(lk_openai.LLM.with_ollama(model=E("OLLAMA_MODEL", "qwen2.5:7b"),
                                                    base_url=E("OLLAMA_BASE_URL", "http://localhost:11434") + "/v1"))
     if not items:
         raise RuntimeError("No LLM configured for the voice worker")
-    chain = lk_llm.FallbackAdapter(items, attempt_timeout=15.0, max_retry_per_llm=0)
-    chain.on("llm_availability_changed",
-             lambda ev: log.warning("LLM %s available=%s", getattr(ev.llm, "model", ev.llm.label), ev.available))
+    for child in items:
+        child.on("metrics_collected", _log_llm_metrics)
+    chain = _OrderedFallback(items, attempt_timeout=15.0, max_retry_per_llm=0)
+    log.info("LLM chain: %s", " -> ".join(f"{c.provider}/{c.model}" for c in items))
     return chain
 
 
@@ -336,7 +392,7 @@ def build_tts():
 
 
 # ---------------- agent ----------------
-def _spread(pages: list[dict], limit: int = 6000) -> str:
+def _spread(pages: list[dict], limit: int = 4000) -> str:
     """Text from every page, trimmed evenly so a long PDF still has its last pages represented."""
     total = sum(len(p.get("text") or "") for p in pages)
     if total <= limit:
@@ -349,21 +405,57 @@ def _spread(pages: list[dict], limit: int = 6000) -> str:
     return "\n".join(out)
 
 
-async def _fetch_docs(http: httpx.AsyncClient) -> list[str]:
+async def _fetch_docs(http: httpx.AsyncClient) -> tuple[list[str], str | None]:
+    """Names for the prompt, plus the most recent upload ("the PDF I uploaded")."""
     try:
         r = await http.get("/api/voice/documents")
         r.raise_for_status()
-        return [d["name"] for d in r.json().get("documents", [])]
+        docs = r.json().get("documents", [])
+        latest = max(docs, key=lambda d: d.get("uploaded_at") or "").get("name") if docs else None
+        return [d["name"] for d in docs], latest
     except Exception:
         log.warning("could not load the document list for the prompt", exc_info=True)
-        return []
+        return [], None
+
+
+def _strip_tool_items(ctx: lk_llm.ChatContext) -> None:
+    """Rewrite any tool item as plain text.
+
+    This agent has no tools, so history never contains a call. If a stale item ever appears, Gemini 3.x must not
+    see it: it answers another provider's function-call history with 400 "missing a thought_signature".
+    """
+    kept = []
+    changed = False
+    for item in list(ctx.items):
+        if isinstance(item, lk_llm.ChatMessage):
+            kept.append(item)
+            continue
+        changed = True
+        if isinstance(item, lk_llm.FunctionCall):
+            args = item.arguments
+            if not isinstance(args, str):
+                args = json.dumps(args or {}, ensure_ascii=False)
+            kept.append(lk_llm.ChatMessage(role="assistant",
+                                           content=[f"(earlier lookup: {item.name} {args or '{}'})"]))
+        elif isinstance(item, lk_llm.FunctionCallOutput):
+            kept.append(lk_llm.ChatMessage(role="assistant",
+                                           content=[f"(earlier lookup result: {item.output or ''})"]))
+    if changed:
+        ctx.items[:] = kept
+        log.warning("flattened tool history to plain text before the LLM request")
+
+
+def _context_note(hits: list[dict]) -> str:
+    body = "\n\n".join(f"[{h['n']}] source_name={_spoken(h['doc'])} page={h['page']}\n"
+                       f"{(h.get('text') or '')[:PASSAGE_CHARS]}" for h in hits)
+    return ("CONTEXT from the indexed documents — the only facts you may use, never read aloud:\n" + body)
 
 
 class FolioAgent(Agent):
     def __init__(self, *, room: rtc.Room, doc_ids: list, ui_lang: str, docs: list[str],
-                 http: httpx.AsyncClient):
+                 latest: str | None, http: httpx.AsyncClient):
         self._room, self._doc_ids, self._http = room, doc_ids, http
-        self._docs, self._ui_lang = docs, ui_lang
+        self._docs, self._latest, self._ui_lang = docs, latest, ui_lang
         self._lang: str | None = None
         super().__init__(instructions=build_instructions(None, docs, ui_lang))
 
@@ -380,74 +472,99 @@ class FolioAgent(Agent):
         log.info("conversation language -> %s", lang)
 
     async def refresh_documents(self) -> None:
-        docs = await _fetch_docs(self._http)
+        docs, latest = await _fetch_docs(self._http)
         if docs != self._docs:
-            self._docs = docs
+            self._docs, self._latest = docs, latest
             await self.update_instructions(build_instructions(self._lang, docs, self._ui_lang))
 
     @property
     def _doc_list(self) -> str:
         return ", ".join(self._docs) if self._docs else "(none indexed yet)"
 
-    @function_tool
-    async def search_documents(self, context: RunContext, query: str) -> str:
-        """Search the indexed documents (government schemes, health advisories, farming guidance, uploads).
-        Call this before answering every factual question.
+    # ---- retrieval-first: the app fetches context, the model never calls a tool ----
+    async def on_user_turn_completed(self, turn_ctx: lk_llm.ChatContext, new_message: lk_llm.ChatMessage) -> None:
+        """Inject the passages this turn needs instead of exposing a search tool.
 
-        Args:
-            query: Short search query in the person's language describing what they want to know.
+        No tool call ever reaches the model, so a Groq -> Gemini fallback can never hand Gemini a function-call
+        history, and one user turn costs exactly one LLM request.
         """
+        text = (new_message.text_content or "").strip()
+        if not text:
+            return
+        turn_ctx.truncate(max_items=HISTORY_ITEMS)  # last 6 turns only
+        _strip_tool_items(turn_ctx)
         try:
-            r = await self._http.post("/api/voice/search", json={"query": query, "doc_ids": self._doc_ids})
-            r.raise_for_status()
-            hits = r.json().get("hits", [])
+            if _wants_full_document(text) and (name := self._pick_document(text)):
+                if await self._inject_document(turn_ctx, name):
+                    return
+            hits = await self._search(text)
+            if hits is None:
+                turn_ctx.add_message(role="assistant", content=UNAVAILABLE_NOTE)
+                return
+            await publish(self._room, "folio.sources", {
+                "type": "sources",
+                "sources": [{"n": h["n"], "doc": h["doc"], "page": h["page"],
+                             "text": h["text"][:300], "score": h["score"]} for h in hits]})
+            if hits:
+                turn_ctx.add_message(role="assistant", content=_context_note(hits))
+            else:
+                turn_ctx.add_message(role="assistant",
+                                     content=NOT_FOUND_NOTE.format(docs=self._doc_list))
         except Exception:
-            log.exception("search_documents failed")
-            return "SEARCH_ERROR: documents are unavailable right now. Tell the user honestly; do not guess."
-        await publish(self._room, "folio.sources", {"type": "sources", "sources": [
-            {"n": h["n"], "doc": h["doc"], "page": h["page"], "text": h["text"][:300], "score": h["score"]}
-            for h in hits]})
-        if not hits:
-            return ("NO_RESULTS: nothing in the documents matches that. Say so honestly; never invent an answer. "
-                    f"Documents you do have: {self._doc_list}")
-        return "\n\n".join(f"[{h['n']}] source_name={_spoken(h['doc'])} page={h['page']}\n{h['text']}" for h in hits)
+            log.exception("context injection failed")
+            turn_ctx.add_message(role="assistant", content=UNAVAILABLE_NOTE)
 
-    @function_tool
-    async def list_documents(self, context: RunContext) -> str:
-        """List the documents you can read, including anything the person uploaded."""
+    async def _search(self, text: str) -> list[dict] | None:
+        """Top MAX_PASSAGES hits, or None when the documents cannot be reached."""
         try:
-            r = await self._http.get("/api/voice/documents")
+            r = await self._http.post("/api/voice/search", json={"query": text, "doc_ids": self._doc_ids})
             r.raise_for_status()
-            names = [d["name"] for d in r.json()["documents"]]
+            return (r.json().get("hits") or [])[:MAX_PASSAGES]
         except Exception:
-            return "SEARCH_ERROR: could not list documents."
-        self._docs = names or self._docs
-        return ", ".join(names) or "NO_DOCUMENTS"
+            log.exception("voice search failed")
+            return None
 
-    @function_tool
-    async def read_document(self, context: RunContext, document_name: str) -> str:
-        """Open one of your documents and return its text. Use this to summarise a PDF, including uploads.
+    def _pick_document(self, text: str) -> str | None:
+        """The document the person means: named, or the one they just uploaded."""
+        low = text.lower()
+        for name in self._docs:
+            stem = Path(name).stem.lower().replace("_", " ").replace("-", " ")
+            if name.lower() in low or stem in low:
+                return name
+        words = {w for w in re.split(r"[^a-z0-9\u0b80-\u0bff]+", low) if len(w) > 3}
+        best, score = None, 0
+        for name in self._docs:
+            name_words = {w for w in re.split(r"[^a-z0-9\u0b80-\u0bff]+", Path(name).stem.lower()) if len(w) > 3}
+            hit = len(words & name_words)
+            if hit > score:
+                best, score = name, hit
+        if best:
+            return best
+        if self._latest and re.search(r"upload|பதிவேற்ற", low):
+            return self._latest
+        return self._docs[0] if len(self._docs) == 1 else None
 
-        Args:
-            document_name: The file name from your document list, e.g. TN_Welfare_Schemes_Demo.pdf
-        """
+    async def _inject_document(self, turn_ctx: lk_llm.ChatContext, name: str) -> bool:
         try:
-            r = await self._http.get("/api/voice/document", params={"doc": document_name})
-            if r.status_code == 404:
-                return (f"NO_DOCUMENT: no document matches {document_name!r}. "
-                        f"Documents you do have: {self._doc_list}. Use list_documents for the exact names.")
+            r = await self._http.get("/api/voice/document", params={"doc": name})
             r.raise_for_status()
             d = r.json()
         except Exception:
-            log.exception("read_document failed")
-            return "SEARCH_ERROR: that document could not be opened right now."
-        pages = d.get("pages") or []
-        if not any((p.get("text") or "").strip() for p in pages):
-            return "NO_TEXT: that document has no readable text (it may be a scanned image)."
+            log.warning("document fetch failed for %r", name, exc_info=True)
+            return False
+        pages = [p for p in d.get("pages") or [] if (p.get("text") or "").strip()]
+        if not pages:
+            turn_ctx.add_message(role="assistant", content=NO_TEXT_NOTE.format(name=name))
+            return True
         await publish(self._room, "folio.sources", {"type": "sources", "sources": [{
-            "n": 1, "doc": d.get("doc", document_name), "page": pages[0]["page"],
+            "n": 1, "doc": d.get("doc") or name, "page": pages[0]["page"],
             "text": (pages[0].get("text") or "")[:300], "score": 1.0}]})
-        return f"DOCUMENT {d.get('doc', document_name)} — {len(pages)} pages\n{_spread(pages, 6000)}"
+        turn_ctx.add_message(role="assistant", content=(
+            f"DOCUMENT {d.get('doc') or name} — {len(pages)} pages (private notes; never read aloud):\n"
+            f"{_spread(pages, DOCUMENT_CHARS)}\n\n"
+            "Summarise the 2 or 3 things that matter most for this person, in 1-3 spoken sentences, "
+            "then name the document."))
+        return True
 
 
 def prewarm(proc: JobProcess) -> None:
@@ -466,12 +583,19 @@ async def entrypoint(ctx: JobContext) -> None:
     http = httpx.AsyncClient(base_url=API_BASE, headers={"X-Agent-Key": AGENT_KEY}, timeout=20)
     ctx.add_shutdown_callback(http.aclose)
 
-    agent = FolioAgent(room=ctx.room, doc_ids=doc_ids, ui_lang=ui_lang, docs=await _fetch_docs(http), http=http)
+    docs, latest = await _fetch_docs(http)
+    agent = FolioAgent(room=ctx.room, doc_ids=doc_ids, ui_lang=ui_lang, docs=docs, latest=latest, http=http)
     session = AgentSession(
         stt=build_stt(), llm=build_llm(), tts=build_tts(), vad=vad,
-        turn_detection=MultilingualModel(),
-        min_endpointing_delay=0.7,  # Tamil may not be covered by the turn model -> rely on VAD delay
         tts_text_transforms=[strip_reasoning, "filter_markdown", "filter_emoji"],
+        turn_handling={
+            "turn_detection": MultilingualModel(),
+            # Tamil is not covered by the turn model, so end-of-turn comes from the VAD delay.
+            "endpointing": {"min_delay": 0.7},
+            # One user turn must cost exactly one LLM request: speculation doubles the prompt tokens and is
+            # discarded anyway whenever on_user_turn_completed injects context.
+            "preemptive_generation": {"enabled": False},
+        },
     )
     states = {"listening": "listening", "thinking": "thinking", "speaking": "speaking",
               "idle": "listening", "initializing": "listening"}

@@ -96,9 +96,12 @@ Documents indexed before this change still hold the old, garbled text. Re-extrac
 cd backend && .venv/Scripts/python scripts/reindex.py   # keeps doc ids, names and page numbers
 ```
 
-At call time the agent's prompt lists every indexed document by name, and `read_document` accepts an
-approximate name (exact name, stem or a fuzzy match like "the welfare pdf") and returns up to 6,000
-characters spread across all pages — so "summarise the PDF I uploaded" works without a keyword guess.
+At call time the agent's prompt lists every indexed document by name. The worker has **no tools**: before each
+reply it calls `/api/voice/search` itself and injects the top 3 passages (400 characters each) as a private
+context message, so the model never emits a tool call and every turn costs exactly one LLM request. A
+whole-document ask ("summarise the PDF I uploaded") is detected up front; the worker reads that document
+through `/api/voice/document` — exact name, stem, fuzzy name, or the most recent upload — and injects up to
+4,000 characters spread across all pages instead.
 
 ### 3. Frontend (Vite + React)
 

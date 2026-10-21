@@ -1,9 +1,12 @@
 """Shared RAG answer pipeline used by /api/chat, /api/solve and eval."""
+import logging
 import time
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 
 from . import llm, metrics, rag, config as C
+
+log = logging.getLogger("folio.pipeline")
 
 LANG = {"ta": "Tamil (தமிழ்), written in Tamil script", "en": "English"}
 NOT_FOUND = {
@@ -42,9 +45,17 @@ async def run_chat(message: str, doc_ids, language: str, chat_id, track: bool = 
         for q, a in metrics.history(chat_id):
             msgs += [HumanMessage(content=q), AIMessage(content=a)]
         msgs.append(HumanMessage(content=f"CONTEXT:\n{_context(hits)}\n\nQUESTION: {message}"))
-        async for tok in llm.astream(msgs, C.REASONING_CHAT, meta):
-            answer += tok
-            yield {"type": "token", "text": tok}
+        try:
+            async for tok in llm.astream(msgs, C.REASONING_CHAT, meta):
+                answer += tok
+                yield {"type": "token", "text": tok}
+        except Exception as e:
+            # llm.astream already fails over to the next model on 429/5xx/timeouts. Getting here means every
+            # model failed, or the stream broke after tokens were sent: keep what the person already read
+            # instead of replacing the answer with an SSE error.
+            if not answer:
+                raise
+            log.warning("chat stream stopped early (%s: %s)", type(e).__name__, str(e)[:200])
     yield {"type": "sources", "sources": [ui_source(h) for h in hits]}
     ms = int((time.perf_counter() - t0) * 1000)
     if track:

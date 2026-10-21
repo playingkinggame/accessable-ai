@@ -54,6 +54,12 @@ class ThinkFilter:
         return out
 
 
+def _is_rate_limit(e: Exception) -> bool:
+    """429 / TPM-RPM exhaustion is a normal, quotable event: skip to the next model instead of failing."""
+    text = f"{type(e).__name__} {e}".lower()
+    return any(k in text for k in ("429", "rate limit", "rate_limit", "ratelimit", "quota", "resource_exhausted"))
+
+
 def _build(kind: str, model: str, effort: str):
     if kind == "groq":
         from langchain_groq import ChatGroq
@@ -131,8 +137,8 @@ async def astream(messages, effort: str = "medium", meta: dict | None = None):
             return
         except Exception as e:
             last = e
-            log.warning("model %s failed (%s: %s)%s", label, type(e).__name__, str(e)[:200],
-                        "" if emitted else " -> trying next")
+            log.warning("model %s %s (%s: %s)%s", label, "rate-limited" if _is_rate_limit(e) else "failed",
+                        type(e).__name__, str(e)[:200], "" if emitted else " -> trying next")
             if emitted:
                 raise
         finally:
